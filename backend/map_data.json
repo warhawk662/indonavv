@@ -1,0 +1,169 @@
+{
+    "nodes": [
+        {
+            "id": "n1773604838925",
+            "x": 119.0,
+            "y": 174.0,
+            "floorId": "lg",
+            "type": "JUNCTION"
+        },
+        {
+            "id": "n1773604842147",
+            "x": 497.0,
+            "y": 141.0,
+            "floorId": "lg",
+            "type": "JUNCTION"
+        },
+        {
+            "id": "n1773604842764",
+            "x": 481.0,
+            "y": 312.0,
+            "floorId": "lg",
+            "type": "JUNCTION"
+        },
+        {
+            "id": "n1773604844683",
+            "x": 389.0,
+            "y": 313.0,
+            "floorId": "lg",
+            "type": "JUNCTION"
+        },
+        {
+            "id": "n1773604845493",
+            "x": 284.0,
+            "y": 316.0,
+            "floorId": "lg",
+            "type": "JUNCTION"
+        },
+        {
+            "id": "n1773604852442",
+            "x": 282.0,
+            "y": 178.0,
+            "floorId": "lg",
+            "type": "JUNCTION"
+        },
+        {
+            "id": "n1773604865637",
+            "x": 330.0,
+            "y": 229.0,
+            "floorId": "lg",
+            "type": "JUNCTION"
+        },
+        {
+            "id": "n1773604867601",
+            "x": 397.0,
+            "y": 237.0,
+            "floorId": "lg",
+            "type": "JUNCTION"
+        },
+        {
+            "id": "n1773604868644",
+            "x": 453.0,
+            "y": 225.0,
+            "floorId": "lg",
+            "type": "JUNCTION"
+        },
+        {
+            "id": "n1773608065385",
+            "x": 310.0,
+            "y": 130.0,
+            "floorId": "lg",
+            "type": "JUNCTION"
+        }
+    ],
+    "edges": [
+        {
+            "id": "e1773604854811",
+            "fromNodeId": "n1773604838925",
+            "toNodeId": "n1773604852442",
+            "distance": 1.0
+        },
+        {
+            "id": "e1773604855770",
+            "fromNodeId": "n1773604852442",
+            "toNodeId": "n1773604845493",
+            "distance": 1.0
+        },
+        {
+            "id": "e1773604871266",
+            "fromNodeId": "n1773604852442",
+            "toNodeId": "n1773604865637",
+            "distance": 1.0
+        },
+        {
+            "id": "e1773604871874",
+            "fromNodeId": "n1773604865637",
+            "toNodeId": "n1773604867601",
+            "distance": 1.0
+        },
+        {
+            "id": "e1773604872654",
+            "fromNodeId": "n1773604867601",
+            "toNodeId": "n1773604844683",
+            "distance": 1.0
+        },
+        {
+            "id": "e1773604873726",
+            "fromNodeId": "n1773604867601",
+            "toNodeId": "n1773604868644",
+            "distance": 1.0
+        },
+        {
+            "id": "e1773604874579",
+            "fromNodeId": "n1773604868644",
+            "toNodeId": "n1773604842147",
+            "distance": 1.0
+        },
+        {
+            "id": "e1773604875690",
+            "fromNodeId": "n1773604868644",
+            "toNodeId": "n1773604842764",
+            "distance": 1.0
+        },
+        {
+            "id": "e1773608068113",
+            "fromNodeId": "n1773608065385",
+            "toNodeId": "n1773604852442",
+            "distance": 1.0
+        }
+    ],
+    "pois": [
+        {
+            "id": "p1773604992972",
+            "name": "room 1",
+            "nodeId": "n1773604838925",
+            "category": "Room"
+        },
+        {
+            "id": "p1773605000790",
+            "name": "room2",
+            "nodeId": "n1773604842147",
+            "category": "Room"
+        },
+        {
+            "id": "p1773605008415",
+            "name": "hall",
+            "nodeId": "n1773604845493",
+            "category": "Room"
+        },
+        {
+            "id": "p1773608042986",
+            "name": "washroom",
+            "nodeId": "n1773604844683",
+            "category": "Room"
+        },
+        {
+            "id": "p1773608061777",
+            "name": "store room",
+            "nodeId": "n1773604842764",
+            "category": "Room"
+        },
+        {
+            "id": "p1773608078106",
+            "name": "dining hall",
+            "nodeId": "n1773608065385",
+            "category": "Room"
+        }
+    ],
+    "bgImageUrl": "uploads/map_background.png"
+}

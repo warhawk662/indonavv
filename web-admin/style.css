@@ -1,0 +1,32 @@
+body {
+    user-select: none;
+}
+
+#mapCanvas {
+    background-color: #f8f9fa;
+    cursor: crosshair;
+    display: block;
+}
+
+.card {
+    border: none;
+    border-radius: 12px;
+}
+
+.btn {
+    border-radius: 8px;
+}
+
+.navbar {
+    padding: 1rem;
+}
+
+#poiEditor {
+    transition: all 0.3s ease;
+}
+
+.form-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #6c757d;
+}

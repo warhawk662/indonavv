@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>indonavv - Admin Panel</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-dark bg-primary shadow-sm mb-4">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">indonavv Admin Panel</span>
+            <div class="d-flex">
+                <button class="btn btn-light btn-sm me-2" onclick="undo()">Undo Last Action</button>
+                <button class="btn btn-warning btn-sm me-2" onclick="toggleCAD()">Toggle CAD Mode</button>
+                <button class="btn btn-success btn-sm me-2" onclick="saveMap()">Save Map</button>
+                <button class="btn btn-outline-light btn-sm me-2" onclick="loadMap()">Refresh Map</button>
+                <button class="btn btn-danger btn-sm" onclick="clearMap()">Clear All</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-md-3">
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-white font-weight-bold">Map Controls</div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label small">Floor Plan Image</label>
+                            <input type="file" class="form-control form-control-sm" id="bgUpload" accept="image/*">
+                        </div>
+                        <div class="mb-3">
+                            <button class="btn btn-dark btn-sm w-100" id="btnCAD" onclick="convertToCAD()">Edge Detection (CAD)</button>
+                        </div>
+                        <div class="btn-group-vertical w-100 mb-3" role="group">
+                            <div class="btn-group w-100" role="group">
+                                <input type="radio" class="btn-check" name="mode" id="modeNode" checked>
+                                <label class="btn btn-outline-primary" for="modeNode">Nodes</label>
+                                <input type="radio" class="btn-check" name="mode" id="modeEdge">
+                                <label class="btn btn-outline-primary" for="modeEdge">Edges</label>
+                            </div>
+                            <div class="btn-group w-100" role="group">
+                                <input type="radio" class="btn-check" name="mode" id="modePoi">
+                                <label class="btn btn-outline-info" for="modePoi">Add POI</label>
+                                <input type="radio" class="btn-check" name="mode" id="modeGeofence">
+                                <label class="btn btn-outline-danger" for="modeGeofence">Geofences</label>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary btn-sm w-100 mb-2" onclick="finishPolygon()">Finish Fence</button>
+                        <p class="text-muted small" id="statusText">Ready.</p>
+                    </div>
+                </div>
+
+                <!-- POI Editor Form -->
+                <div id="poiEditor" class="card shadow-sm d-none mb-4">
+                    <div class="card-header bg-info text-white font-weight-bold small">POI Details</div>
+                    <div class="card-body">
+                        <input type="hidden" id="poiNodeId">
+                        <div class="mb-2">
+                            <label class="form-label small">Name</label>
+                            <input type="text" class="form-control form-control-sm" id="poiName" placeholder="e.g. Radiology">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small">Description</label>
+                            <textarea class="form-control form-control-sm" id="poiDescription" rows="2"></textarea>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small">Category</label>
+                            <select class="form-select form-select-sm" id="poiCategory">
+                                <option value="Lab">Lab</option>
+                                <option value="Classroom">Classroom</option>
+                                <option value="Seminar">Seminar</option>
+                                <option value="Storage">Storage</option>
+                                <option value="Restroom">Restroom</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-info btn-sm text-white w-100" onclick="savePOI()">Save POI</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-9">
+                <div class="card shadow-sm">
+                    <div class="card-body p-0 overflow-auto" style="height: 80vh;">
+                        <canvas id="mapCanvas"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

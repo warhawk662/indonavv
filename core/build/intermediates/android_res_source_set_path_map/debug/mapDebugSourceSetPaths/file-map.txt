@@ -1,0 +1,8 @@
+com.example.indonavv.core-pngs-0 C:\Users\rpran\AndroidStudioProjects\indonavv\core\build\generated\res\pngs\debug
+com.example.indonavv.core-updated_navigation_xml-1 C:\Users\rpran\AndroidStudioProjects\indonavv\core\build\generated\updated_navigation_xml\debug
+com.example.indonavv.core-mergeDebugResources-2 C:\Users\rpran\AndroidStudioProjects\indonavv\core\build\intermediates\incremental\debug\mergeDebugResources\merged.dir
+com.example.indonavv.core-mergeDebugResources-3 C:\Users\rpran\AndroidStudioProjects\indonavv\core\build\intermediates\incremental\debug\mergeDebugResources\stripped.dir
+com.example.indonavv.core-debug-4 C:\Users\rpran\AndroidStudioProjects\indonavv\core\build\intermediates\merged_res\debug\mergeDebugResources
+com.example.indonavv.core-debug-5 C:\Users\rpran\AndroidStudioProjects\indonavv\core\build\intermediates\packaged_res\debug\packageDebugResources
+com.example.indonavv.core-debug-6 C:\Users\rpran\AndroidStudioProjects\indonavv\core\src\debug\res
+com.example.indonavv.core-main-7 C:\Users\rpran\AndroidStudioProjects\indonavv\core\src\main\res
