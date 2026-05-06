@@ -15,11 +15,12 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.indonavv.data.local.MapDao
 import com.example.indonavv.data.model.Edge
+import com.example.indonavv.data.model.Floor
 import com.example.indonavv.data.model.Node
 import com.example.indonavv.data.model.NodeType
 import com.example.indonavv.data.model.POI
 import com.example.indonavv.data.model.RoomBlock
-import com.example.indonavv.data.remote.MapApiService
+import com.example.indonavv.data.remote. MapApiService
 import com.example.indonavv.sensor.PdrManager
 import com.example.indonavv.util.MapMatcher
 import com.example.indonavv.util.PathFinder
@@ -30,10 +31,12 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import okhttp3.*
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlin.math.*
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
@@ -47,12 +50,27 @@ class MapViewModel(
     private val pathFinder = PathFinder()
     private var tts: TextToSpeech? = null
 
-    // Change this to your live server URL (e.g., https://indonavv.onrender.com/)
-    private val apiBaseUrl = "http://192.168.1.11:8080/"
+    // Configuration
+    private val serverIp = if (Build.FINGERPRINT.contains("generic") || Build.MODEL.contains("Emulator") || Build.BRAND.startsWith("generic")) {
+        "10.0.2.2"
+    } else {
+        "192.168.1.106"
+    }
+    
+    private val apiBaseUrl = "http://$serverIp:8080/"
+    private val wsUrl = "ws://$serverIp:8080/map/updates"
     
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+    private val okHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+        
     private val apiService = Retrofit.Builder()
         .baseUrl(apiBaseUrl)
+        .client(okHttpClient)
         .addConverterFactory(MoshiConverterFactory.create(moshi))
         .build()
         .create(MapApiService::class.java)
@@ -60,14 +78,9 @@ class MapViewModel(
     private val _syncStatus = MutableStateFlow("Initializing...")
     val syncStatus: StateFlow<String> = _syncStatus.asStateFlow()
 
-    private val _startSearchQuery = MutableStateFlow("")
-    val startSearchQuery: StateFlow<String> = _startSearchQuery.asStateFlow()
-
-    private val _destSearchQuery = MutableStateFlow("")
-    val destSearchQuery: StateFlow<String> = _destSearchQuery.asStateFlow()
-
-    private val _isSelectingStart = MutableStateFlow(true)
-    val isSelectingStart: StateFlow<Boolean> = _isSelectingStart.asStateFlow()
+    // Data flows from Local DB
+    val floors: StateFlow<List<Floor>> = mapDao.getAllFloors()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val nodes: StateFlow<List<Node>> = mapDao.getAllNodes()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -80,6 +93,19 @@ class MapViewModel(
 
     val allPOIs: StateFlow<List<POI>> = mapDao.getAllPOIs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // UI State
+    private val _currentFloorId = MutableStateFlow("lg")
+    val currentFloorId: StateFlow<String> = _currentFloorId.asStateFlow()
+
+    private val _startSearchQuery = MutableStateFlow("")
+    val startSearchQuery: StateFlow<String> = _startSearchQuery.asStateFlow()
+
+    private val _destSearchQuery = MutableStateFlow("")
+    val destSearchQuery: StateFlow<String> = _destSearchQuery.asStateFlow()
+
+    private val _isSelectingStart = MutableStateFlow(true)
+    val isSelectingStart: StateFlow<Boolean> = _isSelectingStart.asStateFlow()
 
     val startSearchResults: StateFlow<List<POI>> = combine(_startSearchQuery, allPOIs) { query, pois ->
         if (query.isBlank()) pois else pois.filter { it.name.contains(query, ignoreCase = true) }
@@ -119,7 +145,7 @@ class MapViewModel(
     private val _isVoiceEnabled = MutableStateFlow(true)
     val isVoiceEnabled: StateFlow<Boolean> = _isVoiceEnabled.asStateFlow()
 
-    val appVersion = "1.2.0-aesthetic"
+    val appVersion = "1.4.1-multilevel"
 
     private val _isCalibrating = MutableStateFlow(false)
     val isCalibrating: StateFlow<Boolean> = _isCalibrating.asStateFlow()
@@ -132,6 +158,7 @@ class MapViewModel(
     private var isArrived = false
     private var lastAddedNodeId: String? = null
     private var lastInstruction = ""
+    private var webSocket: WebSocket? = null
 
     var onTriggerVoice: (() -> Unit)? = null
 
@@ -144,33 +171,98 @@ class MapViewModel(
         startPdrTracking()
         observeNavigation()
         syncData()
+        connectWebSocket()
+    }
+
+    private fun connectWebSocket() {
+        val request = Request.Builder().url(wsUrl).build()
+        webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                Log.d("MapViewModel", "WebSocket Connected to $wsUrl")
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                if (text == "updated") {
+                    Log.d("MapViewModel", "Realtime update received from server")
+                    syncData()
+                }
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Log.e("MapViewModel", "WebSocket error on $wsUrl: ${t.message}")
+                viewModelScope.launch {
+                    delay(10000)
+                    connectWebSocket()
+                }
+            }
+        })
     }
 
     fun syncData() {
         viewModelScope.launch {
             try {
                 _syncStatus.value = "Syncing..."
-                val nodesList = apiService.getNodes("h1")
-                val edgesList = apiService.getEdges("h1")
-                val poisList = apiService.getPOIs("h1")
-                val blocksList = apiService.getRoomBlocks("h1")
+                Log.d("MapViewModel", "Starting sync from $apiBaseUrl")
                 
-                mapDao.clearAndInsertMapData(nodesList, edgesList, poisList, blocksList)
-                
-                try {
-                    val imageResponse = apiService.getBackgroundImageUrl("h1")
-                    _bgImageUrl.value = "${apiBaseUrl}${imageResponse.string()}?t=${System.currentTimeMillis()}"
-                } catch (e: Exception) {}
-
-                if (nodesList.isNotEmpty() && _userPosition.value == Offset(100f, 100f)) {
-                    _userPosition.value = Offset(nodesList[0].x, nodesList[0].y)
+                // Try to get everything in one call
+                val response = try {
+                    apiService.getFullMap()
+                } catch (e: Exception) {
+                    Log.e("MapViewModel", "getFullMap failed, trying individual endpoints: ${e.message}")
+                    null
                 }
-                _syncStatus.value = "Map Ready"
+
+                if (response != null) {
+                    Log.d("MapViewModel", "Sync success (Unified): ${response.nodes.size} nodes, ${response.pois.size} POIs")
+                    mapDao.clearAndInsertMapData(
+                        response.nodes, 
+                        response.edges, 
+                        response.pois, 
+                        response.roomBlocks, 
+                        response.floors
+                    )
+                    _syncStatus.value = "Map Ready"
+                } else {
+                    // Fallback to individual calls
+                    val hospitalId = "h1"
+                    val nodesList = apiService.getNodes(hospitalId)
+                    val edgesList = apiService.getEdges(hospitalId)
+                    val poisList = apiService.getPOIs(hospitalId)
+                    val floorsList = apiService.getFloors(hospitalId)
+                    val blocksList = try { apiService.getRoomBlocks(hospitalId) } catch (e: Exception) { emptyList() }
+                    
+                    Log.d("MapViewModel", "Sync success (Individual): ${nodesList.size} nodes")
+                    mapDao.clearAndInsertMapData(nodesList, edgesList, poisList, blocksList, floorsList)
+                    _syncStatus.value = "Map Ready"
+                }
+                
+                updateBackgroundImage()
+
+                // If user position is at default, snap to first node
+                val currentNodes = nodes.value
+                if (currentNodes.isNotEmpty() && (_userPosition.value == Offset(100f, 100f) || _userPosition.value == Offset(0f, 0f))) {
+                    val initialNode = currentNodes.find { it.floorId == _currentFloorId.value } ?: currentNodes[0]
+                    _userPosition.value = Offset(initialNode.x, initialNode.y)
+                }
             } catch (e: Exception) {
-                Log.e("MapViewModel", "Sync failed: ${e.message}", e)
+                Log.e("MapViewModel", "Sync failed COMPLETELY at $apiBaseUrl: ${e.message}")
                 _syncStatus.value = "Connection Error"
             }
         }
+    }
+
+    private fun updateBackgroundImage() {
+        val floor = floors.value.find { it.id == _currentFloorId.value }
+        if (floor?.bgImageUrl != null) {
+            _bgImageUrl.value = "${apiBaseUrl}${floor.bgImageUrl}?t=${System.currentTimeMillis()}"
+        } else {
+             _bgImageUrl.value = "${apiBaseUrl}uploads/map_background.png"
+        }
+    }
+
+    fun selectFloor(floorId: String) {
+        _currentFloorId.value = floorId
+        updateBackgroundImage()
     }
 
     private fun startPdrTracking() {
@@ -182,51 +274,74 @@ class MapViewModel(
                     val dy = -(stepLengthPixels * cos(radians)).toFloat()
                     val estimatedPos = Offset(_userPosition.value.x + dx, _userPosition.value.y + dy)
                     
-                    // Enhanced matching with Active Path Bias
-                    val snappedPos = mapMatcher.matchToGraph(estimatedPos, nodes.value, edges.value, update.headingDegrees, _currentPath.value)
+                    val floorNodes = nodes.value.filter { it.floorId == _currentFloorId.value }
+                    val snappedPos = mapMatcher.matchToGraph(estimatedPos, floorNodes, edges.value, update.headingDegrees, _currentPath.value)
                     _userPosition.value = snappedPos
 
-                    performMapAidedCorrection(snappedPos)
+                    performMapAidedCorrection(snappedPos, update.headingDegrees)
                 }
                 _userHeading.value = update.headingDegrees
             }
         }
     }
 
-    private fun performMapAidedCorrection(snappedPos: Offset) {
-        val currentEdge = edges.value.find { edge ->
-            val n1 = nodes.value.find { it.id == edge.fromNodeId }
-            val n2 = nodes.value.find { it.id == edge.toNodeId }
-            if (n1 == null || n2 == null) return@find false
+    private fun performMapAidedCorrection(snappedPos: Offset, sensorHeading: Float) {
+        val path = _currentPath.value
+        if (path.size < 2) {
+            edgeTrackingCount = 0
+            return
+        }
+
+        var currentPathEdge: Pair<Node, Node>? = null
+        for (i in 0 until path.size - 1) {
+            val n1 = path[i]
+            val n2 = path[i+1]
+            if (n1.floorId != _currentFloorId.value) continue
             
             val p1 = Offset(n1.x, n1.y)
             val p2 = Offset(n2.x, n2.y)
-            val dist = distToSegment(snappedPos, p1, p2)
-            dist < 1.0f
+            if (distToSegment(snappedPos, p1, p2) < 5.0f) { 
+                currentPathEdge = n1 to n2
+                break
+            }
         }
 
-        if (currentEdge != null) {
-            if (currentEdge.id == lastEdgeId) {
+        if (currentPathEdge != null) {
+            val (n1, n2) = currentPathEdge
+            val edgeId = "${n1.id}_${n2.id}"
+            
+            if (edgeId == lastEdgeId) {
                 edgeTrackingCount++
-                if (edgeTrackingCount >= 3) {
-                    val n1 = nodes.value.find { it.id == currentEdge.fromNodeId }!!
-                    val n2 = nodes.value.find { it.id == currentEdge.toNodeId }!!
-                    val angle = atan2((n2.y - n1.y).toDouble(), (n2.x - n1.x).toDouble())
-                    val mapHeading = (Math.toDegrees(angle).toFloat() + 90f + 360f) % 360f
+                if (edgeTrackingCount >= 5) {
+                    val dx = n2.x - n1.x
+                    val dy = n2.y - n1.y
+                    val angleRad = atan2(dy.toDouble(), dx.toDouble())
+                    val corridorHeading = (Math.toDegrees(angleRad).toFloat() + 90f + 360f) % 360f
                     
-                    val corrected = if (abs(mapHeading - _userHeading.value) < 90 || abs(mapHeading - _userHeading.value) > 270) {
-                        mapHeading
+                    val diff = abs(corridorHeading - sensorHeading)
+                    val minDiff = min(diff, 360f - diff)
+                    
+                    val correctedTarget = if (minDiff < 90f) {
+                        corridorHeading
                     } else {
-                        (mapHeading + 180f) % 360f
+                        (corridorHeading + 180f) % 360f
                     }
                     
-                    pdrManager.applyMapAidedCorrection(corrected)
+                    val finalDiff = abs(correctedTarget - sensorHeading)
+                    val minFinalDiff = min(finalDiff, 360f - finalDiff)
+                    
+                    if (minFinalDiff > 0.5f && minFinalDiff < 15f) {
+                        pdrManager.applyMapAidedCorrection(correctedTarget)
+                    }
+                    
                     edgeTrackingCount = 0
                 }
             } else {
-                lastEdgeId = currentEdge.id
+                lastEdgeId = edgeId
                 edgeTrackingCount = 1
             }
+        } else {
+            edgeTrackingCount = 0
         }
     }
 
@@ -243,11 +358,27 @@ class MapViewModel(
         combine(userPosition, startPOI, destinationPOI, nodes, edges) { pos, start, dest, nodeList, edgeList ->
             if (dest != null && nodeList.isNotEmpty()) {
                 val startId = start?.nodeId ?: nodeList.minByOrNull { (Offset(it.x, it.y) - pos).getDistance() }?.id
-                if (startId != null) pathFinder.findPath(startId, dest.nodeId, nodeList, edgeList)?.nodes ?: emptyList() else emptyList()
-            } else emptyList()
+                if (startId != null) {
+                    val result = pathFinder.findPath(startId, dest.nodeId, nodeList, edgeList)
+                    Log.d("MapViewModel", "Path from $startId to ${dest.nodeId} found: ${result?.nodes?.size ?: 0} nodes")
+                    result?.nodes ?: emptyList()
+                } else {
+                    Log.e("MapViewModel", "Pathfinding: Start node not found near $pos")
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            }
         }.onEach { path -> 
             _currentPath.value = path
             updateInstructions(path) 
+            
+            if (path.isNotEmpty()) {
+                val firstNode = path[0]
+                if (firstNode.floorId != _currentFloorId.value) {
+                    selectFloor(firstNode.floorId)
+                }
+            }
         }.launchIn(viewModelScope)
     }
 
@@ -260,61 +391,83 @@ class MapViewModel(
         }
 
         val userPos = _userPosition.value
-        val destNode = path.last()
-        val distToDestStraight = (userPos - Offset(destNode.x, destNode.y)).getDistance() / pixelsPerMeter
-
-        // Calculate total path distance accurately
-        var totalDistPixels = 0f
-        if (path.size >= 2) {
-            // Distance from user to the next node in the path (path[0] is current closest, path[1] is where we are going)
-            // Actually path[0] is usually the node we just snapped to or the start.
-            // Let's find where the user is relative to the path.
-            
-            // For simplicity, we sum user -> path[0] -> path[1] -> ... -> path[last]
-            totalDistPixels = (userPos - Offset(path[0].x, path[0].y)).getDistance()
-            for (i in 0 until path.size - 1) {
-                val n1 = path[i]
-                val n2 = path[i+1]
-                totalDistPixels += sqrt((n1.x - n2.x).pow(2) + (n1.y - n2.y).pow(2))
+        
+        var minDistToAny = Float.MAX_VALUE
+        var closestIdx = 0
+        for (i in path.indices) {
+            val d = (userPos - Offset(path[i].x, path[i].y)).getDistance()
+            if (d < minDistToAny) {
+                minDistToAny = d
+                closestIdx = i
             }
-        } else if (path.size == 1) {
-            totalDistPixels = (userPos - Offset(path[0].x, path[0].y)).getDistance()
         }
         
+        val nextNodeIdx = (if (minDistToAny < 20f) closestIdx + 1 else closestIdx).coerceIn(0, path.size - 1)
+
+        var totalDistPixels = (userPos - Offset(path[nextNodeIdx].x, path[nextNodeIdx].y)).getDistance()
+        for (i in nextNodeIdx until path.size - 1) {
+            totalDistPixels += sqrt((path[i].x - path[i+1].x).pow(2) + (path[i].y - path[i+1].y).pow(2))
+        }
         _remainingDistance.value = totalDistPixels / pixelsPerMeter
 
-        if (distToDestStraight < 1.2f && !isArrived) {
-            isArrived = true
-            updateNavigationText("You have arrived!")
-            speak("You have arrived at your destination")
-            vibrate(1000)
-            return
+        val destNode = path.last()
+        if (destNode.floorId == _currentFloorId.value) {
+            val distToDest = (userPos - Offset(destNode.x, destNode.y)).getDistance() / pixelsPerMeter
+            if (distToDest < 1.5f && !isArrived) {
+                isArrived = true
+                updateNavigationText("You have arrived!")
+                return
+            }
         }
 
-        if (path.size >= 2) {
-            val nextNode = path[1]
-            val distToNext = (userPos - Offset(nextNode.x, nextNode.y)).getDistance() / pixelsPerMeter
+        if (nextNodeIdx < path.size) {
+            val targetNode = path[nextNodeIdx]
             
-            // Check for turn at nextNode
-            if (path.size > 2) {
-                val currentNode = path[0]
-                val afterNextNode = path[2]
+            if (targetNode.floorId != _currentFloorId.value) {
+                val targetFloor = floors.value.find { it.id == targetNode.floorId }
+                updateNavigationText("Go to ${targetFloor?.name ?: "another floor"}")
+                return
+            }
+
+            val distToTarget = (userPos - Offset(targetNode.x, targetNode.y)).getDistance() / pixelsPerMeter
+            if (nextNodeIdx + 1 < path.size) {
+                val nextNode = path[nextNodeIdx + 1]
                 
-                val angle1 = atan2((nextNode.y - currentNode.y).toDouble(), (nextNode.x - currentNode.x).toDouble())
-                val angle2 = atan2((afterNextNode.y - nextNode.y).toDouble(), (afterNextNode.x - nextNode.x).toDouble())
+                if (nextNode.floorId != targetNode.floorId) {
+                    val verb = when (targetNode.type) {
+                        NodeType.ELEVATOR -> "Take the elevator"
+                        NodeType.STAIRS -> "Use the stairs"
+                        else -> "Change floors"
+                    }
+                    updateNavigationText("$verb to next floor")
+                    return
+                }
+
+                val prevNode = path[max(0, nextNodeIdx - 1)]
+                val angle1 = atan2((targetNode.y - prevNode.y).toDouble(), (targetNode.x - prevNode.x).toDouble())
+                val angle2 = atan2((nextNode.y - targetNode.y).toDouble(), (nextNode.x - targetNode.x).toDouble())
                 
                 var angleDiff = Math.toDegrees(angle2 - angle1)
                 while (angleDiff < -180) angleDiff += 360
                 while (angleDiff > 180) angleDiff -= 360
                 
-                val instruction = when {
-                    distToNext < 3.0f && angleDiff > 30 -> "Turn right soon"
-                    distToNext < 3.0f && angleDiff < -30 -> "Turn left soon"
+                val poiAtTurn = allPOIs.value.find { it.nodeId == targetNode.id }
+                val turnRef = if (poiAtTurn != null) " at ${poiAtTurn.name}" else ""
+
+                val command = when {
+                    distToTarget < 1.5f && angleDiff > 45 -> "Turn right now$turnRef"
+                    distToTarget < 1.5f && angleDiff < -45 -> "Turn left now$turnRef"
+                    distToTarget < 4.5f && angleDiff > 45 -> "Ahead, turn right$turnRef"
+                    distToTarget < 4.5f && angleDiff < -45 -> "Ahead, turn left$turnRef"
+                    distToTarget < 1.5f && abs(angleDiff) > 120 -> "Make a U-turn"
                     else -> "Go straight"
                 }
-                updateNavigationText(instruction)
+                
+                if (command != "Go straight" || lastInstruction == "") {
+                    updateNavigationText(command)
+                }
             } else {
-                updateNavigationText("Go straight to your destination")
+                updateNavigationText("Destination is ahead")
             }
         }
     }
@@ -356,7 +509,10 @@ class MapViewModel(
     fun setStartPOI(poi: POI?) { 
         _startPOI.value = poi
         if (poi != null) {
-            nodes.value.find { it.id == poi.nodeId }?.let { _userPosition.value = Offset(it.x, it.y) }
+            nodes.value.find { it.id == poi.nodeId }?.let { 
+                selectFloor(it.floorId)
+                _userPosition.value = Offset(it.x, it.y) 
+            }
             _isSelectingStart.value = false
             speak("Setting start to ${poi.name}. Where would you like to go?")
         }
@@ -366,7 +522,9 @@ class MapViewModel(
         _destinationPOI.value = poi 
         _destSearchQuery.value = "" 
         isArrived = false 
-        if (poi != null) speak("Destination set to ${poi.name}. Follow the blue arrow.")
+        if (poi != null) {
+            speak("Destination set to ${poi.name}. Follow the blue arrow.")
+        }
     }
     
     fun clearDestination() { 
@@ -375,7 +533,7 @@ class MapViewModel(
         _currentPath.value = emptyList() 
         isArrived = false 
         _isSelectingStart.value = true 
-        speak("Navigation cancelled.")
+        speak("Navigation cleared")
     }
 
     fun calibrateSensors() {
@@ -440,7 +598,7 @@ class MapViewModel(
             try {
                 val newNode = Node(
                     id = UUID.randomUUID().toString(),
-                    floorId = "h1",
+                    floorId = _currentFloorId.value,
                     x = _userPosition.value.x,
                     y = _userPosition.value.y,
                     type = type
@@ -461,14 +619,14 @@ class MapViewModel(
             try {
                 val toNode = Node(
                     id = UUID.randomUUID().toString(),
-                    floorId = "h1",
+                    floorId = _currentFloorId.value,
                     x = _userPosition.value.x,
                     y = _userPosition.value.y,
                     type = NodeType.JUNCTION
                 )
                 apiService.addNode(toNode)
                 
-                val fromNode = nodes.value.find { it.id == fromId }
+                val fromNode = mapDao.getAllNodes().first().find { it.id == fromId }
                 if (fromNode != null) {
                     val distance = sqrt((toNode.x - fromNode.x).pow(2) + (toNode.y - fromNode.y).pow(2))
                     val newEdge = Edge(
@@ -509,7 +667,11 @@ class MapViewModel(
         }
     }
 
-    override fun onCleared() { super.onCleared(); tts?.shutdown() }
+    override fun onCleared() { 
+        super.onCleared()
+        tts?.shutdown() 
+        webSocket?.close(1000, "ViewModel cleared")
+    }
 }
 
 class MapViewModelFactory(private val mapDao: MapDao, private val application: Application) : ViewModelProvider.Factory {

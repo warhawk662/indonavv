@@ -13,7 +13,8 @@ data class RoomBlock(
     @PrimaryKey val id: String,
     val name: String,
     val points: List<Point>,
-    val color: String
+    val color: String,
+    val floorId: String = "lg"
 )
 
 @JsonClass(generateAdapter = true)

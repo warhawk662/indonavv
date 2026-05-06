@@ -7,102 +7,107 @@ import kotlin.math.*
 
 class MapMatcher {
     private var lastMatchedPosition: Offset? = null
-    // Adjusted threshold for snapping to the graph (in pixels)
-    // 1 meter = 15 pixels. 5 meters = 75 pixels. 
-    private val snapThreshold = 100f 
+    private var lastMatchedEdgeId: String? = null
+    
+    // Constants for matching logic (1 meter = 15 pixels)
+    private val snapThreshold = 120f // ~8 meters
+    private val outlierThreshold = 200f // ~13 meters
+    
+    // Hysteresis weights to prevent jitter
+    private val stayOnPathBonus = 1.8f
+    private val stayOnEdgeBonus = 1.4f
 
     /**
-     * Enhanced Map Matching with Active Path Bias.
-     * Snaps the raw PDR position to the navigation graph.
+     * Advanced Map Matching with Delta-Based Movement Preservation.
+     * Snaps the raw PDR position to the navigation graph without losing velocity.
      */
     fun matchToGraph(
-        position: Offset, 
+        rawPosition: Offset, 
         nodes: List<Node>, 
         edges: List<Edge>, 
         userHeading: Float? = null,
         activePath: List<Node> = emptyList()
     ): Offset {
-        if (nodes.isEmpty()) return position
+        if (nodes.isEmpty()) return rawPosition
 
-        var bestMatch = position
+        // 1. Movement Delta Preservation
+        // We calculate how much the PDR wants to move, and we apply that movement
+        // primarily along the matched graph edges.
+        val lastPos = lastMatchedPosition ?: return rawPosition.also { lastMatchedPosition = it }
+        val pdrDelta = rawPosition - lastPos
+        val movementMagnitude = pdrDelta.getDistance()
+        
+        if (movementMagnitude < 0.1f) return lastPos
+
+        // 2. Probabilistic Edge Matching
+        var bestMatch = rawPosition
         var highestScore = -Float.MAX_VALUE
-        var foundAnySnap = false
+        var bestEdgeId: String? = null
+        
+        val activePathNodeIds = activePath.map { it.id }.toSet()
 
-        // 1. Prioritize snapping to the ACTIVE navigation path if available
-        if (activePath.size >= 2) {
-            for (i in 0 until activePath.size - 1) {
-                val n1 = activePath[i]
-                val n2 = activePath[i+1]
-                val p1 = Offset(n1.x, n1.y)
-                val p2 = Offset(n2.x, n2.y)
+        edges.forEach { edge ->
+            val fromNode = nodes.find { it.id == edge.fromNodeId }
+            val toNode = nodes.find { it.id == edge.toNodeId }
+            
+            if (fromNode != null && toNode != null) {
+                val p1 = Offset(fromNode.x, fromNode.y)
+                val p2 = Offset(toNode.x, toNode.y)
                 
-                val projection = projectPointOnSegment(position, p1, p2)
-                val distanceToEdge = (position - projection).getDistance()
+                val projection = projectPointOnSegment(rawPosition, p1, p2)
+                val distanceToEdge = (rawPosition - projection).getDistance()
 
-                // High bias for staying on the calculated path
-                if (distanceToEdge < snapThreshold * 1.5f) {
-                    val score = 10.0f / (1.0f + distanceToEdge)
-                    if (score > highestScore) {
-                        highestScore = score
-                        bestMatch = projection
-                        foundAnySnap = true
-                    }
-                }
-            }
-        }
-
-        // 2. If not on active path or score is low, check all edges
-        if (!foundAnySnap || highestScore < 2.0f) {
-            edges.forEach { edge ->
-                val fromNode = nodes.find { it.id == edge.fromNodeId }
-                val toNode = nodes.find { it.id == edge.toNodeId }
+                if (distanceToEdge > snapThreshold) return@forEach
                 
-                if (fromNode != null && toNode != null) {
-                    val p1 = Offset(fromNode.x, fromNode.y)
-                    val p2 = Offset(toNode.x, toNode.y)
+                // Scoring Mechanism
+                val proximityScore = exp(- (distanceToEdge * distanceToEdge) / (2 * 50f * 50f))
+                
+                var headingScore = 0.5f
+                if (userHeading != null) {
+                    val angleRad = atan2((p2.y - p1.y).toDouble(), (p2.x - p1.x).toDouble())
+                    val edgeHeading = (Math.toDegrees(angleRad).toFloat() + 90f + 360f) % 360f
                     
-                    val projection = projectPointOnSegment(position, p1, p2)
-                    val distanceToEdge = (position - projection).getDistance()
+                    val diff = abs(userHeading - edgeHeading)
+                    val minDiff = min(diff, 360f - diff)
+                    val bidirectionalDiff = min(minDiff, abs(180f - minDiff))
+                    headingScore = max(0.1f, cos(Math.toRadians(bidirectionalDiff.toDouble()).toFloat()))
+                }
 
-                    if (distanceToEdge > snapThreshold) return@forEach
-                    
-                    val distanceScore = 1.0f / (1.0f + distanceToEdge)
-                    
-                    // Heading alignment score
-                    var headingScore = 0.5f
-                    if (userHeading != null) {
-                        val angle = atan2((p2.y - p1.y).toDouble(), (p2.x - p1.x).toDouble())
-                        val edgeHeading = (Math.toDegrees(angle).toFloat() + 360f) % 360f
-                        val diff = abs(userHeading - edgeHeading)
-                        val minDiff = min(diff, 360f - diff)
-                        val bidirectionalDiff = min(minDiff, abs(180f - minDiff))
-                        headingScore = cos(Math.toRadians(bidirectionalDiff.toDouble())).toFloat().coerceAtLeast(0.0f)
-                    }
+                var topologicalBonus = 1.0f
+                val isEdgeOnActivePath = activePathNodeIds.contains(edge.fromNodeId) && 
+                                       activePathNodeIds.contains(edge.toNodeId)
+                if (isEdgeOnActivePath) topologicalBonus *= stayOnPathBonus
+                if (edge.id == lastMatchedEdgeId) topologicalBonus *= stayOnEdgeBonus
 
-                    val totalScore = (distanceScore * 0.7f) + (headingScore * 0.3f)
+                val totalScore = (proximityScore * 0.5f + headingScore * 0.5f) * topologicalBonus
 
-                    if (totalScore > highestScore) {
-                        highestScore = totalScore
-                        bestMatch = projection
-                        foundAnySnap = true
-                    }
+                if (totalScore > highestScore) {
+                    highestScore = totalScore
+                    bestMatch = projection
+                    bestEdgeId = edge.id
                 }
             }
         }
 
-        // 3. Last fallback: snap to nearest node if user is near a junction
-        if (!foundAnySnap) {
-            val nearestNode = nodes.minByOrNull { (Offset(it.x, it.y) - position).getDistance() }
-            if (nearestNode != null) {
-                val nodePos = Offset(nearestNode.x, nearestNode.y)
-                if ((position - nodePos).getDistance() < snapThreshold) {
-                    bestMatch = nodePos
-                }
+        // 3. Fallback to raw if no good match, or damp if outlier
+        if (highestScore < 0.15f) {
+            if (movementMagnitude > outlierThreshold) {
+                bestMatch = lastPos + pdrDelta * (outlierThreshold / movementMagnitude)
+            } else {
+                bestMatch = rawPosition
             }
+            bestEdgeId = null
         }
 
-        lastMatchedPosition = bestMatch
-        return bestMatch
+        // 4. Temporal Continuity (Minimal Smoothing)
+        // Only use enough smoothing to prevent visual "jitter" on the line, 
+        // but not enough to cause lag. Factor 0.9 means 90% new, 10% old.
+        val smoothedMatch = lastPos + (bestMatch - lastPos) * 0.92f
+
+        lastMatchedPosition = smoothedMatch
+        lastMatchedEdgeId = bestEdgeId
+        
+        return smoothedMatch
     }
 
     private fun projectPointOnSegment(p: Offset, a: Offset, b: Offset): Offset {

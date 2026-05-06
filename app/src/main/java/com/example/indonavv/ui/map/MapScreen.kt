@@ -33,6 +33,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.indonavv.data.model.NodeType
 import com.example.indonavv.data.model.POI
@@ -58,6 +60,7 @@ fun MapScreen(viewModel: MapViewModel) {
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val isCalibrating by viewModel.isCalibrating.collectAsStateWithLifecycle()
     val isAdminMode by viewModel.isAdminMode.collectAsStateWithLifecycle()
+    val remainingDistance by viewModel.remainingDistance.collectAsStateWithLifecycle()
     
     val pois by viewModel.allPOIs.collectAsStateWithLifecycle()
 
@@ -70,6 +73,18 @@ fun MapScreen(viewModel: MapViewModel) {
     
     var startFocused by remember { mutableStateOf(false) }
     var destFocused by remember { mutableStateOf(false) }
+
+    // State for arrival dialog
+    var showArrivalDialog by remember { mutableStateOf(false) }
+    var arrivedAtName by remember { mutableStateOf("") }
+
+    LaunchedEffect(navigationInstruction) {
+        if (navigationInstruction == "You have arrived!") {
+            arrivedAtName = destinationPOI?.name ?: "your destination"
+            showArrivalDialog = true
+            viewModel.clearDestination()
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -143,7 +158,7 @@ fun MapScreen(viewModel: MapViewModel) {
                     
                     Spacer(Modifier.height(20.dp))
                     
-                    if (!isAdminMode && !showPOIList) {
+                    if (!isAdminMode && !showPOIList && destinationPOI == null) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             SearchField(
                                 value = startSearchQuery,
@@ -196,27 +211,25 @@ fun MapScreen(viewModel: MapViewModel) {
                     val destinationNode = if (currentPath.isNotEmpty()) currentPath.last() else null
                     
                     if (destinationNode != null) {
-                        val distanceToDestination = (userPosition - Offset(destinationNode.x, destinationNode.y)).getDistance() / 15f
-                        
                         if (nextTarget != null) {
                             val angleToTarget = Math.toDegrees(atan2((nextTarget.y - userPosition.y).toDouble(), (nextTarget.x - userPosition.x).toDouble())).toFloat() + 90f
                             AirtagArrow(
                                 heading = (angleToTarget - userHeading + 360f) % 360f,
                                 instruction = navigationInstruction,
-                                distanceMeters = distanceToDestination
+                                distanceMeters = remainingDistance
                             )
-                        } else if (distanceToDestination < 1.0f) {
-                            ArrivalView(destinationPOI!!.name) { viewModel.clearDestination() }
                         } else {
-                            // Close but not yet arrived at the final node
+                            // Target the final node directly
+                            val angleToTarget = Math.toDegrees(atan2((destinationNode.y - userPosition.y).toDouble(), (destinationNode.x - userPosition.x).toDouble())).toFloat() + 90f
                             AirtagArrow(
-                                heading = (Math.toDegrees(atan2((destinationNode.y - userPosition.y).toDouble(), (destinationNode.x - userPosition.x).toDouble())).toFloat() + 90f - userHeading + 360f) % 360f,
-                                instruction = "Arriving soon",
-                                distanceMeters = distanceToDestination
+                                heading = (angleToTarget - userHeading + 360f) % 360f,
+                                instruction = navigationInstruction,
+                                distanceMeters = remainingDistance
                             )
                         }
                     } else {
-                        ArrivalView(destinationPOI!!.name) { viewModel.clearDestination() }
+                        // Fallback
+                        AssistantCenterView(onMicClick = { viewModel.triggerAssistant() })
                     }
                 } else {
                     AssistantCenterView(onMicClick = { viewModel.triggerAssistant() })
@@ -238,6 +251,23 @@ fun MapScreen(viewModel: MapViewModel) {
             if (destinationPOI != null && !isAdminMode && !showPOIList) {
                 LargeCancelButton(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp)) {
                     viewModel.clearDestination()
+                }
+            }
+
+            // ARRIVAL POPUP
+            if (showArrivalDialog) {
+                Dialog(
+                    onDismissRequest = { showArrivalDialog = false },
+                    properties = DialogProperties(usePlatformDefaultWidth = false)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.9f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        ArrivalView(arrivedAtName) { showArrivalDialog = false }
+                    }
                 }
             }
 
@@ -627,14 +657,7 @@ fun AirtagArrow(heading: Float, instruction: String, distanceMeters: Float) {
         
         Spacer(Modifier.height(60.dp))
         
-        Text(
-            "${String.format("%.1f", distanceMeters)}m",
-            style = MaterialTheme.typography.displayLarge.copy(
-                fontWeight = FontWeight.Black,
-                color = Color.White,
-                letterSpacing = (-2).sp
-            )
-        )
+        // DISTANCE REMOVED AS REQUESTED
         
         Surface(
             color = Color.White.copy(alpha = 0.05f),

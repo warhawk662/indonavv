@@ -45,7 +45,16 @@ data class RoomBlock(
     val id: String,
     val name: String,
     val points: List<Point>,
-    val color: String = "#E3F2FD" // Default light blue
+    val color: String = "#E3F2FD", // Default light blue
+    val floorId: String = "h1"
+)
+
+@Serializable
+data class Floor(
+    val id: String,
+    val name: String,
+    val level: Int,
+    val bgImageUrl: String? = null
 )
 
 @Serializable
@@ -56,7 +65,8 @@ data class MapData(
     val nodes: List<Node> = emptyList(),
     val edges: List<Edge> = emptyList(),
     val pois: List<POI> = emptyList(),
-    val bgImageUrl: String? = null,
+    val bgImageUrl: String? = null, // Legacy, kept for compatibility
     val geofences: List<Geofence> = emptyList(),
-    val roomBlocks: List<RoomBlock> = emptyList()
+    val roomBlocks: List<RoomBlock> = emptyList(),
+    val floors: List<Floor> = emptyList()
 )

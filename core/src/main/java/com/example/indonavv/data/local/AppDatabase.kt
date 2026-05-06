@@ -5,13 +5,9 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
-import com.example.indonavv.data.model.Converters
-import com.example.indonavv.data.model.Edge
-import com.example.indonavv.data.model.Node
-import com.example.indonavv.data.model.POI
-import com.example.indonavv.data.model.RoomBlock
+import com.example.indonavv.data.model.*
 
-@Database(entities = [Node::class, Edge::class, POI::class, RoomBlock::class], version = 2, exportSchema = false)
+@Database(entities = [Node::class, Edge::class, POI::class, RoomBlock::class, Floor::class], version = 3, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun mapDao(): MapDao

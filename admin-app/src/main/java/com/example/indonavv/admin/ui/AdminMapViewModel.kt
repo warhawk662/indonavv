@@ -14,6 +14,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.indonavv.data.local.MapDao
 import com.example.indonavv.data.model.Edge
+import com.example.indonavv.data.model.Floor
 import com.example.indonavv.data.model.Node
 import com.example.indonavv.data.model.NodeType
 import com.example.indonavv.data.model.POI
@@ -22,11 +23,15 @@ import com.example.indonavv.data.remote.MapApiService
 import com.example.indonavv.sensor.PdrManager
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlin.math.*
 
 class AdminMapViewModel(
@@ -36,12 +41,27 @@ class AdminMapViewModel(
 
     private val pdrManager = PdrManager(application)
     
-    // Change this to your live server URL (e.g., https://indonavv.onrender.com/)
-    private val apiBaseUrl = "http://192.168.1.11:8080/"
+    private val serverIp = if (Build.FINGERPRINT.contains("generic") || Build.MODEL.contains("Emulator") || Build.BRAND.startsWith("generic")) {
+        "10.0.2.2"
+    } else {
+        "192.168.1.106"
+    }
+    
+    private val apiBaseUrl = "http://$serverIp:8080/"
     
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+    
+    private val okHttpClient = OkHttpClient.Builder()
+        .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY })
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+
     private val apiService = Retrofit.Builder()
         .baseUrl(apiBaseUrl)
+        .client(okHttpClient)
         .addConverterFactory(MoshiConverterFactory.create(moshi))
         .build()
         .create(MapApiService::class.java)
@@ -49,8 +69,15 @@ class AdminMapViewModel(
     private val _syncStatus = MutableStateFlow("Initializing...")
     val syncStatus: StateFlow<String> = _syncStatus.asStateFlow()
 
-    val nodes: StateFlow<List<Node>> = mapDao.getAllNodes()
+    val floors: StateFlow<List<Floor>> = mapDao.getAllFloors()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _currentFloorId = MutableStateFlow("lg")
+    val currentFloorId: StateFlow<String> = _currentFloorId.asStateFlow()
+
+    val nodes: StateFlow<List<Node>> = combine(mapDao.getAllNodes(), _currentFloorId) { allNodes, floorId ->
+        allNodes.filter { it.floorId == floorId }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val edges: StateFlow<List<Edge>> = mapDao.getAllEdges()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -74,6 +101,29 @@ class AdminMapViewModel(
         syncData()
     }
 
+    fun selectFloor(floorId: String) {
+        _currentFloorId.value = floorId
+        // Reset position to first node of new floor if it exists
+        viewModelScope.launch {
+            val floorNodes = nodes.value
+            if (floorNodes.isNotEmpty()) {
+                _userPosition.value = Offset(floorNodes[0].x, floorNodes[0].y)
+            }
+        }
+    }
+
+    fun addFloor(name: String, level: Int) {
+        viewModelScope.launch {
+            try {
+                val newFloor = Floor(UUID.randomUUID().toString(), name, level)
+                apiService.addFloor(newFloor)
+                syncData()
+            } catch (e: Exception) {
+                Log.e("AdminMapViewModel", "Add floor failed: ${e.message}")
+            }
+        }
+    }
+
     fun setStepLength(value: Float) {
         _stepLength.value = value
     }
@@ -82,20 +132,51 @@ class AdminMapViewModel(
         viewModelScope.launch {
             try {
                 _syncStatus.value = "Syncing..."
-                val nodesList = apiService.getNodes("h1")
-                val edgesList = apiService.getEdges("h1")
-                val poisList = apiService.getPOIs("h1")
-                val blocksList = apiService.getRoomBlocks("h1")
+                Log.d("AdminMapViewModel", "Syncing from: $apiBaseUrl")
                 
-                mapDao.clearAndInsertMapData(nodesList, edgesList, poisList, blocksList)
+                val response = apiService.getFullMap()
+                Log.d("AdminMapViewModel", "Sync success: ${response.nodes.size} nodes, ${response.floors.size} floors")
                 
-                if (nodesList.isNotEmpty() && _userPosition.value == Offset(100f, 100f)) {
-                    _userPosition.value = Offset(nodesList[0].x, nodesList[0].y)
+                mapDao.clearAndInsertMapData(
+                    response.nodes, 
+                    response.edges, 
+                    response.pois, 
+                    response.roomBlocks, 
+                    response.floors
+                )
+                
+                if (response.nodes.isNotEmpty()) {
+                    var currentNodes = response.nodes.filter { it.floorId == _currentFloorId.value }
+                    if (currentNodes.isEmpty()) {
+                        val firstNode = response.nodes[0]
+                        _currentFloorId.value = firstNode.floorId
+                        currentNodes = response.nodes.filter { it.floorId == firstNode.floorId }
+                    }
+                    
+                    if (currentNodes.isNotEmpty() && (_userPosition.value == Offset(100f, 100f) || _userPosition.value == Offset(0f, 0f))) {
+                        _userPosition.value = Offset(currentNodes[0].x, currentNodes[0].y)
+                    }
                 }
-                _syncStatus.value = "Map Ready (${nodesList.size} nodes)"
+                
+                _syncStatus.value = "Map Ready"
             } catch (e: Exception) {
                 Log.e("AdminMapViewModel", "Sync failed: ${e.message}")
-                _syncStatus.value = "Sync Error: Check Connection"
+                
+                // Fallback to individual endpoints if /map fails
+                try {
+                    val hospitalId = "h1"
+                    val floorsList = apiService.getFloors(hospitalId)
+                    val nodesList = apiService.getNodes(hospitalId)
+                    val edgesList = apiService.getEdges(hospitalId)
+                    val poisList = apiService.getPOIs(hospitalId)
+                    val blocksList = try { apiService.getRoomBlocks(hospitalId) } catch (e: Exception) { emptyList() }
+                    
+                    mapDao.clearAndInsertMapData(nodesList, edgesList, poisList, blocksList, floorsList)
+                    _syncStatus.value = "Map Ready (Partial)"
+                } catch (e2: Exception) {
+                    Log.e("AdminMapViewModel", "Fallback sync also failed: ${e2.message}")
+                    _syncStatus.value = "Sync Error"
+                }
             }
         }
     }
@@ -146,7 +227,7 @@ class AdminMapViewModel(
             try {
                 val newNode = Node(
                     id = UUID.randomUUID().toString(),
-                    floorId = "h1",
+                    floorId = _currentFloorId.value,
                     x = _userPosition.value.x,
                     y = _userPosition.value.y,
                     type = type
@@ -168,14 +249,14 @@ class AdminMapViewModel(
             try {
                 val toNode = Node(
                     id = UUID.randomUUID().toString(),
-                    floorId = "h1",
+                    floorId = _currentFloorId.value,
                     x = _userPosition.value.x,
                     y = _userPosition.value.y,
                     type = NodeType.JUNCTION
                 )
                 apiService.addNode(toNode)
                 
-                val fromNode = nodes.value.find { it.id == fromId }
+                val fromNode = mapDao.getAllNodes().first().find { it.id == fromId }
                 if (fromNode != null) {
                     val distance = sqrt((toNode.x - fromNode.x).pow(2) + (toNode.y - fromNode.y).pow(2))
                     val newEdge = Edge(
@@ -198,9 +279,20 @@ class AdminMapViewModel(
     }
 
     fun addPOIAtCurrentPosition(name: String, category: String) {
-        val currentNodeId = lastAddedNodeId ?: return
         viewModelScope.launch {
             try {
+                val currentNodeId = lastAddedNodeId ?: nodes.value.minByOrNull { 
+                    val dx = it.x - _userPosition.value.x
+                    val dy = it.y - _userPosition.value.y
+                    sqrt(dx*dx + dy*dy)
+                }?.id
+                
+                if (currentNodeId == null) {
+                    Log.e("AdminMapViewModel", "Cannot add POI: No nodes found near current position")
+                    _syncStatus.value = "Add POI Failed: No Nodes"
+                    return@launch
+                }
+
                 val newPOI = POI(
                     id = UUID.randomUUID().toString(),
                     nodeId = currentNodeId,
@@ -238,6 +330,7 @@ class AdminMapViewModel(
 class AdminMapViewModelFactory(private val mapDao: MapDao, private val application: Application) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        return AdminMapViewModel(mapDao, application) as T
+        if (modelClass.isAssignableFrom(AdminMapViewModel::class.java)) return AdminMapViewModel(mapDao, application) as T
+        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }

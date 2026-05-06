@@ -55,6 +55,76 @@ fun Arrow(text: String) {
 
 @Preview(showBackground = true, backgroundColor = 0xFF0A0A0F)
 @Composable
+fun FunctionalFlowDiagram() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0A0A0F))
+            .padding(24.dp),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                "indonavv Functional Workflow",
+                style = MaterialTheme.typography.headlineMedium,
+                color = Color.White,
+                fontWeight = FontWeight.Black
+            )
+            Spacer(Modifier.height(24.dp))
+
+            // Step 1
+            Block(
+                "1. Map Creation",
+                "Admin Panel: Create nodes,\nedges, and POIs over CAD.",
+                Icons.Rounded.EditRoad,
+                Color(0xFFFFC107)
+            )
+
+            Arrow("Publish to Cloud")
+
+            // Step 2
+            Block(
+                "2. Data Sync",
+                "App fetches JSON data and\ncaches it in Room DB.",
+                Icons.Rounded.CloudDownload,
+                Color(0xFF00E676)
+            )
+
+            Arrow("User Opens Map")
+
+            // Step 3
+            Block(
+                "3. Localization",
+                "PDR Engine tracks motion\nvia phone sensors.",
+                Icons.Rounded.MyLocation,
+                Color(0xFF2196F3)
+            )
+
+            Arrow("Select Destination")
+
+            // Step 4
+            Block(
+                "4. Navigation",
+                "Dijkstra algorithm computes\noptimal path across floors.",
+                Icons.Rounded.Navigation,
+                Color(0xFF9C27B0)
+            )
+
+            Arrow("Follow Guidance")
+
+            // Step 5
+            Block(
+                "5. Arrived",
+                "Haptic & Voice feedback\nupon reaching POI.",
+                Icons.Rounded.CheckCircle,
+                Color(0xFFE91E63)
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F)
+@Composable
 fun ProjectArchitectureDiagram() {
     Box(
         modifier = Modifier

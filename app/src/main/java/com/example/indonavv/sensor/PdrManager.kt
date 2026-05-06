@@ -19,28 +19,30 @@ data class PdrUpdate(val stepDetected: Boolean, val headingDegrees: Float)
 class PdrManager(private val context: Context) {
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val rotationVector = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
-    private val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-    private val magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+    private val gameRotationVector = sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+    private val gyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
     private val stepDetector = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
     private val linearAccel = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
 
     private var currentHeading = 0f
     private var smoothedHeading = 0f
-    private val alphaHeading = 0.08f // Even smoother heading for stability
+    private var isInitialized = false
+    
+    // Adaptive heading alpha
+    private var currentAlpha = 0.08f
+    private val baseAlpha = 0.05f
+    private val turnAlpha = 0.25f
 
     // Step Detection Algorithm Variables
-    private var lastLinearMag = 0f
-    private var isPeak = false
-    private val stepMinThreshold = 1.0f // Lowered threshold for better sensitivity
+    private val stepMinThreshold = 0.72f 
     private var lastStepTime = 0L
     private val stepCooldownMs = 300L 
-
-    // Orientation variables for fallback
-    private var gravity = FloatArray(3)
-    private var geomagnetic = FloatArray(3)
+    private var lastLinearMag = 0f
+    private var isPeak = false
 
     // Map-aided correction offset
     private var headingOffset = 0f
+    private val correctionAlpha = 0.12f 
 
     fun getPdrUpdates(): Flow<PdrUpdate> = callbackFlow {
         val listener = object : SensorEventListener {
@@ -62,38 +64,27 @@ class PdrManager(private val context: Context) {
                             
                             val currentTime = System.currentTimeMillis()
                             if (linearMag > stepMinThreshold && !isPeak && (currentTime - lastStepTime > stepCooldownMs)) {
-                                if (linearMag < lastLinearMag) { // Peak detected
+                                if (linearMag < lastLinearMag) { 
                                     isPeak = true
                                     lastStepTime = currentTime
                                     vibrate(30)
                                     trySend(PdrUpdate(true, getCorrectedHeading()))
                                 }
-                            } else if (linearMag < 0.4f) {
+                            } else if (linearMag < 0.35f) {
                                 isPeak = false
                             }
                             lastLinearMag = linearMag
                         }
                     }
 
-                    Sensor.TYPE_ROTATION_VECTOR -> {
+                    Sensor.TYPE_GYROSCOPE -> {
+                        val turnRate = abs(event.values[2]) 
+                        currentAlpha = if (turnRate > 0.45f) turnAlpha else baseAlpha
+                    }
+
+                    Sensor.TYPE_GAME_ROTATION_VECTOR, Sensor.TYPE_ROTATION_VECTOR -> {
                         updateHeadingFromRotationVector(event.values)
                         trySend(PdrUpdate(false, getCorrectedHeading()))
-                    }
-
-                    Sensor.TYPE_ACCELEROMETER -> {
-                        if (rotationVector == null) {
-                            gravity = event.values.clone()
-                            updateHeadingFromAccelMag()
-                            trySend(PdrUpdate(false, getCorrectedHeading()))
-                        }
-                    }
-
-                    Sensor.TYPE_MAGNETIC_FIELD -> {
-                        if (rotationVector == null) {
-                            geomagnetic = event.values.clone()
-                            updateHeadingFromAccelMag()
-                            trySend(PdrUpdate(false, getCorrectedHeading()))
-                        }
                     }
                 }
             }
@@ -106,31 +97,26 @@ class PdrManager(private val context: Context) {
                 
                 val rawAzimuth = Math.toDegrees(orientation[0].toDouble()).toFloat()
                 currentHeading = (rawAzimuth + 360f) % 360f
-                smoothedHeading = smoothAngle(smoothedHeading, currentHeading, alphaHeading)
-            }
-
-            private fun updateHeadingFromAccelMag() {
-                val R = FloatArray(9)
-                val I = FloatArray(9)
-                if (SensorManager.getRotationMatrix(R, I, gravity, geomagnetic)) {
-                    val orientation = FloatArray(3)
-                    SensorManager.getOrientation(R, orientation)
-                    val rawAzimuth = Math.toDegrees(orientation[0].toDouble()).toFloat()
-                    currentHeading = (rawAzimuth + 360f) % 360f
-                    smoothedHeading = smoothAngle(smoothedHeading, currentHeading, alphaHeading)
+                
+                if (!isInitialized) {
+                    smoothedHeading = currentHeading
+                    isInitialized = true
+                } else {
+                    smoothedHeading = smoothAngle(smoothedHeading, currentHeading, currentAlpha)
                 }
             }
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
 
-        // Register best available high-frequency sensors
-        sensorManager.registerListener(listener, stepDetector ?: linearAccel ?: accelerometer, SensorManager.SENSOR_DELAY_FASTEST)
-        if (rotationVector != null) {
-            sensorManager.registerListener(listener, rotationVector, SensorManager.SENSOR_DELAY_FASTEST)
-        } else {
-            sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_FASTEST)
-            sensorManager.registerListener(listener, magnetometer, SensorManager.SENSOR_DELAY_FASTEST)
+        // Register sensors with optimized delays
+        sensorManager.registerListener(listener, stepDetector ?: linearAccel, SensorManager.SENSOR_DELAY_FASTEST)
+        sensorManager.registerListener(listener, gyro, SensorManager.SENSOR_DELAY_FASTEST)
+        
+        // Prefer Game Rotation Vector for indoors, fallback to standard
+        val rotationSensor = gameRotationVector ?: rotationVector
+        rotationSensor?.let {
+            sensorManager.registerListener(listener, it, SensorManager.SENSOR_DELAY_GAME)
         }
 
         awaitClose { sensorManager.unregisterListener(listener) }
@@ -141,9 +127,13 @@ class PdrManager(private val context: Context) {
     }
 
     fun applyMapAidedCorrection(mapHeading: Float) {
-        // Calculate the difference between intended map heading and current sensor smoothed heading
-        val diff = (mapHeading - smoothedHeading + 540f) % 360f - 180f
-        headingOffset = (diff + 360f) % 360f
+        val current = getCorrectedHeading()
+        var diff = mapHeading - current
+        while (diff < -180) diff += 360
+        while (diff > 180) diff -= 360
+        
+        // Nudge the offset toward the map heading
+        headingOffset = (headingOffset + correctionAlpha * diff + 360f) % 360f
     }
 
     private fun smoothAngle(prev: Float, target: Float, alpha: Float): Float {

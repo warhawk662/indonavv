@@ -1,10 +1,7 @@
 package com.example.indonavv.data.local
 
 import androidx.room.*
-import com.example.indonavv.data.model.Edge
-import com.example.indonavv.data.model.Node
-import com.example.indonavv.data.model.POI
-import com.example.indonavv.data.model.RoomBlock
+import com.example.indonavv.data.model.*
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -39,21 +36,30 @@ interface MapDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRoomBlocks(blocks: List<RoomBlock>)
 
+    @Query("SELECT * FROM floors ORDER BY level ASC")
+    fun getAllFloors(): Flow<List<Floor>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFloors(floors: List<Floor>)
+
     @Transaction
     suspend fun clearAndInsertMapData(
         nodes: List<Node>, 
         edges: List<Edge>, 
         pois: List<POI>,
-        roomBlocks: List<RoomBlock> = emptyList()
+        roomBlocks: List<RoomBlock> = emptyList(),
+        floors: List<Floor> = emptyList()
     ) {
         clearAllNodes()
         clearAllEdges()
         clearAllPOIs()
         clearAllRoomBlocks()
+        clearAllFloors()
         insertNodes(nodes)
         insertEdges(edges)
         insertPOIs(pois)
         insertRoomBlocks(roomBlocks)
+        insertFloors(floors)
     }
 
     @Query("DELETE FROM nodes")
@@ -67,4 +73,7 @@ interface MapDao {
 
     @Query("DELETE FROM room_blocks")
     suspend fun clearAllRoomBlocks()
+
+    @Query("DELETE FROM floors")
+    suspend fun clearAllFloors()
 }

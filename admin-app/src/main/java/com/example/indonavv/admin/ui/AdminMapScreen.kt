@@ -3,6 +3,7 @@ package com.example.indonavv.admin.ui
 import androidx.compose.animation.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -39,9 +40,14 @@ fun AdminMapScreen(viewModel: AdminMapViewModel) {
     val pois by viewModel.pois.collectAsStateWithLifecycle()
     val stepLength by viewModel.stepLength.collectAsStateWithLifecycle()
     
+    val floors by viewModel.floors.collectAsStateWithLifecycle()
+    val currentFloorId by viewModel.currentFloorId.collectAsStateWithLifecycle()
+
     var poiDialogOpen by remember { mutableStateOf(false) }
     var calibrationDialogOpen by remember { mutableStateOf(false) }
-    var showMap by remember { mutableStateOf(false) }
+    var floorDialogOpen by remember { mutableStateOf(false) }
+    
+    var showMap by remember { mutableStateOf(true) }
     var showPOIList by remember { mutableStateOf(false) }
     var clearConfirmOpen by remember { mutableStateOf(false) }
 
@@ -50,8 +56,20 @@ fun AdminMapScreen(viewModel: AdminMapViewModel) {
         containerColor = Color(0xFF0A0A0F),
         topBar = {
             TopAppBar(
-                title = { Text("Indonavv Admin", fontWeight = FontWeight.Black) },
+                title = { 
+                    Column {
+                        Text("Indonavv Admin", fontWeight = FontWeight.Black, fontSize = 18.sp)
+                        Text(
+                            floors.find { it.id == currentFloorId }?.name ?: "Unknown Floor",
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
+                    }
+                },
                 actions = {
+                    IconButton(onClick = { floorDialogOpen = true }) {
+                        Icon(Icons.Rounded.Layers, contentDescription = "Floors", tint = Color(0xFF00E676))
+                    }
                     IconButton(onClick = { clearConfirmOpen = true }) {
                         Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear All", tint = Color(0xFFFF5252))
                     }
@@ -142,9 +160,9 @@ fun AdminMapScreen(viewModel: AdminMapViewModel) {
                     ) {
                         Column(Modifier.padding(16.dp)) {
                             Text("Instructions:", color = Color(0xFF00E676), fontWeight = FontWeight.Bold)
-                            Text("1. Walk to a starting point, tap '+' to add first node.", color = Color.LightGray, fontSize = 12.sp)
-                            Text("2. Walk to next junction, tap 'Link' to add node & path.", color = Color.LightGray, fontSize = 12.sp)
-                            Text("3. Use Calibration (tune icon) to correct drift.", color = Color.LightGray, fontSize = 12.sp)
+                            Text("1. Use 'Layers' icon to select or add a floor.", color = Color.LightGray, fontSize = 12.sp)
+                            Text("2. Walk to starting point, tap '+' to add first node.", color = Color.LightGray, fontSize = 12.sp)
+                            Text("3. Walk to next junction, tap 'Link' to add node & path.", color = Color.LightGray, fontSize = 12.sp)
                         }
                     }
                 }
@@ -160,6 +178,49 @@ fun AdminMapScreen(viewModel: AdminMapViewModel) {
                     Spacer(Modifier.width(8.dp))
                     Text(syncStatus, fontSize = 10.sp, color = Color.White.copy(alpha = 0.7f), fontWeight = FontWeight.Bold)
                 }
+            }
+
+            if (floorDialogOpen) {
+                var newFloorName by remember { mutableStateOf("") }
+                var newFloorLevel by remember { mutableStateOf("0") }
+                
+                AlertDialog(
+                    onDismissRequest = { floorDialogOpen = false },
+                    containerColor = Color(0xFF1E1E1E),
+                    title = { Text("Floors", color = Color.White) },
+                    text = {
+                        Column {
+                            Text("Select Floor:", color = Color.Gray, fontSize = 12.sp)
+                            LazyColumn(Modifier.heightIn(max = 200.dp)) {
+                                items(floors) { floor ->
+                                    Row(
+                                        Modifier.fillMaxWidth().clickable { viewModel.selectFloor(floor.id); floorDialogOpen = false }.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Rounded.Layers, null, tint = if(floor.id == currentFloorId) Color(0xFF00E676) else Color.Gray)
+                                        Spacer(Modifier.width(12.dp))
+                                        Text(floor.name, color = Color.White)
+                                    }
+                                }
+                            }
+                            Divider(Modifier.padding(vertical = 8.dp), color = Color.Gray)
+                            Text("Add New Floor:", color = Color.Gray, fontSize = 12.sp)
+                            TextField(value = newFloorName, onValueChange = { newFloorName = it }, label = { Text("Name (e.g. 2nd Floor)") })
+                            TextField(value = newFloorLevel, onValueChange = { newFloorLevel = it }, label = { Text("Level (e.g. 1)") })
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            if (newFloorName.isNotBlank()) {
+                                viewModel.addFloor(newFloorName, newFloorLevel.toIntOrNull() ?: 0)
+                                newFloorName = ""
+                            }
+                        }) { Text("Add Floor") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { floorDialogOpen = false }) { Text("Close") }
+                    }
+                )
             }
 
             if (poiDialogOpen) {
