@@ -23,13 +23,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "indonavv"
-
-if (System.getenv("RENDER") == "true" || System.getenv("DOCKER_BUILD") == "true") {
-    println("Build detected as Cloud/Docker - Including only backend")
-    include(":backend")
-} else {
-    include(":app")
-    include(":backend")
-    include(":admin-app")
-    include(":core")
-}
+include(":app")
+include(":backend")
+include(":admin-app")
+include(":core")

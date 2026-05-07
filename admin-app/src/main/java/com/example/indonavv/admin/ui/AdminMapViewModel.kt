@@ -42,7 +42,7 @@ class AdminMapViewModel(
     private val pdrManager = PdrManager(application)
     
     // Configuration
-    private val useRender = true // Toggle this to true for cloud deployment
+    private val useRender = false // Toggle this to true for cloud deployment
     private val renderUrl = "indonavv-backend.onrender.com" // Update this with your actual Render URL
 
     private val serverIp = if (Build.FINGERPRINT.contains("generic") || Build.MODEL.contains("Emulator") || Build.BRAND.startsWith("generic")) {
