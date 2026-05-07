@@ -9,7 +9,3 @@ services:
     envVars:
       - key: PORT
         value: 8080
-    disk:
-      name: indonavv-uploads
-      mountPath: /app/uploads
-      sizeGB: 1
