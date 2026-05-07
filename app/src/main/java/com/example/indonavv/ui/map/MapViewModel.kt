@@ -51,14 +51,17 @@ class MapViewModel(
     private var tts: TextToSpeech? = null
 
     // Configuration
+    private val useRender = false // Toggle this to true for cloud deployment
+    private val renderUrl = "indonavv-backend.onrender.com" // Update this with your actual Render URL
+
     private val serverIp = if (Build.FINGERPRINT.contains("generic") || Build.MODEL.contains("Emulator") || Build.BRAND.startsWith("generic")) {
         "10.0.2.2"
     } else {
-        "192.168.1.106"
+        "192.168.1.3"
     }
     
-    private val apiBaseUrl = "http://$serverIp:8080/"
-    private val wsUrl = "ws://$serverIp:8080/map/updates"
+    private val apiBaseUrl = if (useRender) "https://$renderUrl/" else "http://$serverIp:8080/"
+    private val wsUrl = if (useRender) "wss://$renderUrl/map/updates" else "ws://$serverIp:8080/map/updates"
     
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
     private val okHttpClient = OkHttpClient.Builder()

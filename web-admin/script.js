@@ -16,7 +16,9 @@ let currentGeofencePoints = [];
 
 // Determine API Base
 let API_BASE = "http://localhost:8080";
-if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+if (window.location.hostname.includes("onrender.com")) {
+    API_BASE = "https://indonavv-backend.onrender.com"; // Update with your actual backend URL
+} else if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
     API_BASE = `http://${window.location.hostname}:8080`;
 }
 

@@ -1,0 +1,9 @@
+.gradle
+.idea
+build
+app/build
+admin-app/build
+backend/build
+core/build
+*.log
+.git
