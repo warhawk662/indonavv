@@ -54,6 +54,7 @@ fun MapScreen(viewModel: MapViewModel) {
     
     val userPosition by viewModel.userPosition.collectAsStateWithLifecycle()
     val userHeading by viewModel.userHeading.collectAsStateWithLifecycle()
+    val isPathfinding by viewModel.isPathfinding.collectAsStateWithLifecycle()
     val currentPath by viewModel.currentPath.collectAsStateWithLifecycle()
     val navigationInstruction by viewModel.navigationInstruction.collectAsStateWithLifecycle()
     val isVoiceEnabled by viewModel.isVoiceEnabled.collectAsStateWithLifecycle()
@@ -210,7 +211,13 @@ fun MapScreen(viewModel: MapViewModel) {
                     val nextTarget = if (currentPath.size > 1) Offset(currentPath[1].x, currentPath[1].y) else null
                     val destinationNode = if (currentPath.isNotEmpty()) currentPath.last() else null
                     
-                    if (destinationNode != null) {
+                    if (isPathfinding) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = Color(0xFF2196F3))
+                            Spacer(Modifier.height(16.dp))
+                            Text("Calculating path...", color = Color.White)
+                        }
+                    } else if (destinationNode != null) {
                         if (nextTarget != null) {
                             val angleToTarget = Math.toDegrees(atan2((nextTarget.y - userPosition.y).toDouble(), (nextTarget.x - userPosition.x).toDouble())).toFloat() + 90f
                             AirtagArrow(
@@ -228,8 +235,13 @@ fun MapScreen(viewModel: MapViewModel) {
                             )
                         }
                     } else {
-                        // Fallback
-                        AssistantCenterView(onMicClick = { viewModel.triggerAssistant() })
+                        // Fallback - Path not found but destination is set
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Rounded.LocationOff, null, Modifier.size(64.dp), tint = Color.Gray)
+                            Spacer(Modifier.height(16.dp))
+                            Text("No path found to ${destinationPOI?.name}", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("Try setting a different start point", color = Color.Gray, fontSize = 14.sp)
+                        }
                     }
                 } else {
                     AssistantCenterView(onMicClick = { viewModel.triggerAssistant() })

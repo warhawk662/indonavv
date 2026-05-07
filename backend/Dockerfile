@@ -27,6 +27,8 @@ WORKDIR /app
 COPY --from=build /home/gradle/src/backend/build/libs/*-all.jar /app/ktor-backend.jar
 # Copy the initial map data if it exists
 COPY --from=build /home/gradle/src/backend/map_data.json /app/map_data.json
+# Copy web-admin static files
+COPY --from=build /home/gradle/src/web-admin /app/web-admin
 
 # Create uploads directory
 RUN mkdir -p /app/uploads

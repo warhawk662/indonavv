@@ -65,9 +65,9 @@ class MapViewModel(
     
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
     private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
         
@@ -135,6 +135,9 @@ class MapViewModel(
 
     private val _userHeading = MutableStateFlow(0f)
     val userHeading: StateFlow<Float> = _userHeading.asStateFlow()
+
+    private val _isPathfinding = MutableStateFlow(false)
+    val isPathfinding: StateFlow<Boolean> = _isPathfinding.asStateFlow()
 
     private val _currentPath = MutableStateFlow<List<Node>>(emptyList())
     val currentPath: StateFlow<List<Node>> = _currentPath.asStateFlow()
@@ -360,16 +363,20 @@ class MapViewModel(
     private fun observeNavigation() {
         combine(userPosition, startPOI, destinationPOI, nodes, edges) { pos, start, dest, nodeList, edgeList ->
             if (dest != null && nodeList.isNotEmpty()) {
+                _isPathfinding.value = true
                 val startId = start?.nodeId ?: nodeList.minByOrNull { (Offset(it.x, it.y) - pos).getDistance() }?.id
                 if (startId != null) {
                     val result = pathFinder.findPath(startId, dest.nodeId, nodeList, edgeList)
                     Log.d("MapViewModel", "Path from $startId to ${dest.nodeId} found: ${result?.nodes?.size ?: 0} nodes")
+                    _isPathfinding.value = false
                     result?.nodes ?: emptyList()
                 } else {
                     Log.e("MapViewModel", "Pathfinding: Start node not found near $pos")
+                    _isPathfinding.value = false
                     emptyList()
                 }
             } else {
+                _isPathfinding.value = false
                 emptyList()
             }
         }.onEach { path -> 

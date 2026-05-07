@@ -6,6 +6,7 @@ services:
     plan: free
     dockerContext: .
     dockerfilePath: backend/Dockerfile
+    healthCheckPath: /
     envVars:
       - key: PORT
         value: 8080

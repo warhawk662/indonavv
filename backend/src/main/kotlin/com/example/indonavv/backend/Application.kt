@@ -109,6 +109,11 @@ fun Application.module() {
         }
         
         staticFiles("/uploads", uploadsDir)
+        
+        // Serve Web Admin
+        staticFiles("/", File("web-admin")) {
+            default("index.html")
+        }
 
         webSocket("/map/updates") {
             sessions.add(this)
